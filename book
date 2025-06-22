@@ -1,0 +1,524 @@
+#!/bin/bash
+
+echo "The Linux From Scratch book
+
+This  script  doesn't  install  everything for you. You’ll still need to perform
+most  steps  manually.  Its  purpose  is  to  provide  a helpful environment for
+navigating  and  working  through  the  LFS  process  more  easily. It automates
+certain  repetitive  tasks (like running scripts from the LFS book) and offers a
+cleaner workflow.
+
+You  can  navigate  the book using the commands prev, next, and show directly in
+the prompt. To jump to a specific section, type its number (e.g., 5.3).
+
+Additionally,  if you want to run any normal Bash command, just prefix it with a
+dot (.). For example:
+
+	.echo \"Hello, World!\"
+"
+echo -e	"\e[33m################################################################################\e[0m"
+
+checkutils()
+{	# A script to list version numbers of critical development tools
+
+	# If you have tools installed in other directories, adjust PATH here AND
+	# in ~lfs/.bashrc (section 4.4) as well.
+
+	LC_ALL=C 
+	PATH=/usr/bin:/bin
+
+	bail() { echo "FATAL: $1"; exit 1; }
+	grep --version > /dev/null 2> /dev/null || bail "grep does not work"
+	sed '' /dev/null || bail "sed does not work"
+	sort   /dev/null || bail "sort does not work"
+
+	ver_check()
+	{
+		if ! type -p $2 &>/dev/null
+		then 
+			echo "ERROR: Cannot find $2 ($1)"; return 1; 
+		fi
+		v=$($2 --version 2>&1 | grep -E -o '[0-9]+\.[0-9\.]+[a-z]*' | head -n1)
+		if printf '%s\n' $3 $v | sort --version-sort --check &>/dev/null
+		then 
+			printf "OK:    %-9s %-6s >= $3\n" "$1" "$v"; return 0;
+		else 
+			printf "ERROR: %-9s is TOO OLD ($3 or later required)\n" "$1"; 
+			return 1; 
+		fi
+	}
+
+	ver_kernel()
+	{
+		kver=$(uname -r | grep -E -o '^[0-9\.]+')
+		if printf '%s\n' $1 $kver | sort --version-sort --check &>/dev/null
+		then 
+			printf "OK:    Linux Kernel $kver >= $1\n"; return 0;
+		else 
+			printf "ERROR: Linux Kernel ($kver) is TOO OLD ($1 or later required)\n" "$kver"; 
+			return 1; 
+		fi
+	}
+
+	# Coreutils first because --version-sort needs Coreutils >= 7.0
+	ver_check Coreutils      sort     8.1 || bail "Coreutils too old, stop"
+	ver_check Bash           bash     3.2
+	ver_check Binutils       ld       2.13.1
+	ver_check Bison          bison    2.7
+	ver_check Diffutils      diff     2.8.1
+	ver_check Findutils      find     4.2.31
+	ver_check Gawk           gawk     4.0.1
+	ver_check GCC            gcc      5.2
+	ver_check "GCC (C++)"    g++      5.2
+	ver_check Grep           grep     2.5.1a
+	ver_check Gzip           gzip     1.3.12
+	ver_check M4             m4       1.4.10
+	ver_check Make           make     4.0
+	ver_check Patch          patch    2.5.4
+	ver_check Perl           perl     5.8.8
+	ver_check Python         python3  3.4
+	ver_check Sed            sed      4.1.5
+	ver_check Tar            tar      1.22
+	ver_check Texinfo        texi2any 5.0
+	ver_check Xz             xz       5.0.0
+	ver_kernel 5.4 
+
+	if mount | grep -q 'devpts on /dev/pts' && [ -e /dev/ptmx ]
+	then echo "OK:    Linux Kernel supports UNIX 98 PTY";
+	else echo "ERROR: Linux Kernel does NOT support UNIX 98 PTY"; fi
+
+	alias_check() {
+		if $1 --version 2>&1 | grep -qi $2
+		then printf "OK:    %-4s is $2\n" "$1";
+		else printf "ERROR: %-4s is NOT $2\n" "$1"; fi
+	}
+	echo "Aliases:"
+	alias_check awk GNU
+	alias_check yacc Bison
+	alias_check sh Bash
+
+	echo "Compiler check:"
+	if printf "int main(){}" | g++ -x c++ -
+	then echo "OK:    g++ works";
+	else echo "ERROR: g++ does NOT work"; fi
+	rm -f a.out
+
+	if [ "$(nproc)" = "" ]; then
+		echo "ERROR: nproc is not available or it produces empty output"
+	else
+		echo "OK: nproc reports $(nproc) logical cores are available"
+	fi
+}
+
+declare -A book
+book["2.1"]="Introduction
+
+In this chapter, the  host tools needed for  building  LFS are  checked and,  if
+necessary,  installed. Then  a partition  which  will  host  the  LFS  system is
+prepared. We will create the partition itself,  create a file  system on it, and
+mount it."
+
+book["2.2"]="Host System Requirements
+
+2.2.1. Hardware
+The  LFS editors recommend that the system CPU have at least four cores and that
+the  system  have  at least 8 GB of memory. Older systems that do not meet these
+requirements   will  still  work,  but  the  time  to  build  packages  will  be
+significantly longer than documented.
+
+2.2.2. Software
+Your  host  system  should have the following software with the minimum versions
+indicated. This should not be an issue for most modern Linux distributions. Also
+note that many distributions will place software headers into separate packages,
+often  in  the  form  of  <package-name>-devel or <package-name>-dev. Be sure to
+install those if your distribution provides them.
+
+Earlier  versions  of  the  listed software packages may work, but have not been
+tested.
+
+    Bash-3.2 (/bin/sh should be a symbolic or hard link to bash)
+
+    Binutils-2.13.1 (Versions greater than 2.44 are not recommended as they have
+                    not been tested)
+
+    Bison-2.7 (/usr/bin/yacc  should  be  a link to bison or a small script that
+              executes bison)
+
+    Coreutils-8.1
+
+    Diffutils-2.8.1
+
+    Findutils-4.2.31
+
+    Gawk-4.0.1 (/usr/bin/awk should be a link to gawk)
+
+    GCC-5.2 including  the  C++  compiler, g++ (Versions greater than 14.2.0 are
+            not  recommended  as  they have not been tested). C and C++ standard
+            libraries  (with  headers)  must also be present so the C++ compiler
+            can build hosted programs
+
+    Grep-2.5.1a
+
+    Gzip-1.3.12
+
+    Linux Kernel-5.4 The  reason  for  the kernel version requirement is that we
+                     specify  that  version when building glibc in Chapter 5 and
+                     Chapter  8,  so  the  workarounds for older kernels are not
+                     enabled  and  the  compiled  glibc  is  slightly faster and
+                     smaller.  As  at Dec 2024, 5.4 is the oldest kernel release
+                     still  supported  by  the  kernel  developers.  Some kernel
+                     releases   older   than   5.4  may  be  still  supported by
+                     third-party  teams,  but  they  are not considered official
+                     upstream kernel releases; read:
+     
+                     https://kernel.org/category/releases.html
+
+                     for the details.
+
+                     If  the  host  kernel  is  earlier  than  5.4 you will need
+                     to replace the kernel with a more up-to-date version. There
+                     are  two  ways  you  can  go about this. First, see if your
+                     Linux  vendor  provides  a  5.4 or later kernel package. If
+                     so,  you  may  wish  to  install it. If your vendor doesn't
+                     offer an acceptable kernel package, or you would prefer not
+                     to   install   it,  you  can  compile  a  kernel  yourself.
+                     Instructions  for  compiling the kernel and configuring the
+                     boot  loader  (assuming  the host uses GRUB) are located in
+                     Chapter 10.
+
+                     We  require  the  host  kernel  to  support  UNIX 98 pseudo
+                     terminal  (PTY).  It  should  be  enabled on all desktop or
+                     server distros shipping Linux 5.4 or a newer kernel. If you
+                     are    building    a    custom    host    kernel,    ensure
+                     CONFIG_UNIX98_PTYS is set to y in the kernel configuration.
+
+    M4-1.4.10
+
+    Make-4.0
+
+    Patch-2.5.4
+
+    Perl-5.8.8
+
+    Python-3.4
+
+    Sed-4.1.5
+
+    Tar-1.22
+
+    Texinfo-5.0
+
+    Xz-5.0.0
+
+!!! Important !!!
+
+Note that the symlinks mentioned above are required to build an LFS system using
+the  instructions  contained  within  this  book.  Symlinks  that point to other
+software (such as dash, mawk, etc.) may work, but are not tested or supported by
+the LFS development team, and may require either deviation from the instructions
+or additional patches to some packages.
+
+To  see  whether  your  host  system  has  all the appropriate versions, and the
+ability to compile programs, run \"checkutils\" on the command line."
+
+book["2.3"]="Building LFS in Stages
+
+LFS  is  designed  to  be built in one session. That is, the instructions assume
+that  the  system  will  not be shut down during the process. This does not mean
+that  the  system  has  to  be  built  in one sitting. The issue is that certain
+procedures  must  be  repeated  after  a  reboot  when resuming LFS at different
+points.
+
+2.3.1. Chapters 1-4
+These  chapters  run commands on the host system. When restarting, be certain of
+one thing:
+
+    * Procedures  performed  as  the  root  user after Section 2.4 must have the
+      LFS environment variable set FOR THE ROOT USER.
+
+2.3.2. Chapters 5-6
+
+    * The /mnt/lfs partition must be mounted.
+
+    * These  two  chapters  must be done as user lfs. A su - lfs command must be
+      issued before performing any task in these chapters. If you don't do that,
+      you  are  at  risk  of  installing  packages  to the host, and potentially
+      rendering it unusable.
+
+    * The  procedures in General Compilation Instructions are critical. If there
+      is any doubt a package has been installed correctly, ensure the previously
+      expanded  tarball  has  been  removed,  then  re-extract  the package, and
+      complete all the instructions in that section.
+
+2.3.3. Chapters 7-10
+
+    * The /mnt/lfs partition must be mounted.
+
+    * A  few  operations,  from  “Preparine  Virtual  Kernel  File  Systems”  to
+      “Entering the Chroot Environment,” must be done as the root user, with the
+      LFS environment variable set for the root user.
+
+    * When  entering  chroot,  the  LFS  environment  variable  must  be set for
+      root.  The  LFS variable is not used after the chroot environment has been
+      entered.
+
+    * The  virtual  file  systems  must  be  mounted. This can be done before or
+      after  entering   chroot  by  changing  to  a  host  virtual terminal and,
+      as root, running  the  commands in Section 7.3.1, “Mounting and Populating
+      /dev” and Section 7.3.2, “Mounting Virtual Kernel File Systems.”"
+
+book["2.4"]="Creating a New Partition
+
+Like  most  other  operating  systems,  LFS  is usually installed on a dedicated
+partition.  The  recommended  approach  to  building  an LFS system is to use an
+available  empty partition or, if you have enough unpartitioned space, to create
+one.
+
+A  minimal  system  requires  a  partition  of around 10 gigabytes (GB). This is
+enough  to  store  all the source tarballs and compile the packages. However, if
+the  LFS  system is intended to be the primary Linux system, additional software
+will  probably  be  installed  which  will  require  additional  space . A 30 GB
+partition is a reasonable size to provide for growth. The LFS system itself will
+not  take  up  this much room. A large portion of this requirement is to provide
+sufficient  free temporary storage as well as for adding additional capabilities
+after  LFS  is  complete.  Additionally, compiling packages can require a lot of
+disk space which will be reclaimed after the package is installed.
+
+Because  there  is  not  always  enough Random Access Memory (RAM) available for
+compilation  processes,  it is a good idea to use a small disk partition as swap
+space.  This  is  used  by  the  kernel to store seldom-used data and leave more
+memory  available for active processes. The swap partition for an LFS system can
+be  the  same  as  the  one  used  by  the  host system, in which case it is not
+necessary to create another one.
+
+Start  a  disk  partitioning program such as cfdisk or fdisk with a command line
+option  naming  the  hard  disk  on  which the new partition will be created-for
+example /dev/sda for the primary disk drive. Create a Linux native partition and
+a swap partition, if needed. Please refer to cfdisk(8) or fdisk(8) if you do not
+yet know how to use the programs.
+
+Note:
+
+    For  experienced users, other partitioning schemes are possible. The new LFS
+    system  can  be  on a software RAID array or an LVM logical volume. However,
+    some  of  these  options  require  an initramfs, which is an advanced topic.
+    These  partitioning  methodologies  are  not  recommended for first time LFS
+    users.
+
+Remember the designation of the new partition (e.g., sda5). This book will refer
+to  this  as  the  LFS  partition.  Also  remember  the  designation of the swap
+partition. These names will be needed later for the /etc/fstab file.
+
+2.4.1. Other Partition Issues
+Requests  for  advice on system partitioning are often posted on the LFS mailing
+lists.  This is a highly subjective topic. The default for most distributions is
+to  use the entire drive with the exception of one small swap partition. This is
+not  optimal  for LFS for several reasons. It reduces flexibility, makes sharing
+of  data  across  multiple  distributions  or  LFS builds  more difficult, makes
+backups  more  time  consuming,  and  can  waste  disk space through inefficient
+allocation of file system structures.
+
+2.4.1.1. The Root Partition
+A  root  LFS  partition  (not to be confused with the /root directory) of twenty
+gigabytes  is  a  good  compromise for most systems. It provides enough space to
+build  LFS  and  most  of  BLFS, but is small enough so that multiple partitions
+can be easily created for experimentation.
+
+2.4.1.2. The Swap Partition
+Most   distributions  automatically  create  a  swap  partition.  Generally  the
+recommended  size  of  the  swap partition is about twice the amount of physical
+RAM,  however  this  is  rarely  needed. If disk space is limited, hold the swap
+partition to two gigabytes and monitor the amount of disk swapping.
+
+If you want to use the hibernation feature (suspend-to-disk) of Linux, it writes
+out the contents of RAM to the swap partition before turning off the machine. In
+this  case  the  size  of  the swap partition should be at least as large as the
+system's installed RAM.
+
+Swapping  is  never good. For mechanical hard drives you can generally tell if a
+system  is  swapping  by  just  listening to disk activity and observing how the
+system  reacts  to  commands. With an SSD you will not be able to hear swapping,
+but  you  can  tell how much swap space is being used by running the top or free
+programs.  Use of an SSD for a swap partition should be avoided if possible. The
+first  reaction  to swapping should be to check for an unreasonable command such
+as trying to edit a five gigabyte file. If swapping becomes a normal occurrence,
+the best solution is to purchase more RAM for your system.
+
+2.4.1.3. The Grub Bios Partition
+If  the boot disk has been partitioned with a GUID Partition Table (GPT), then a
+small,  typically  1 MB, partition must be created if it does not already exist.
+This  partition  is  not formatted, but must be available for GRUB to use during
+installation  of  the  boot  loader.  This  partition  will  normally be labeled
+'BIOS Boot' if using fdisk or have a code of EF02 if using the gdisk command.
+
+Note:
+
+    The  Grub Bios partition must be on the drive that the BIOS uses to boot the
+    system. This is not necessarily the drive that holds the LFS root partition.
+    The disks on a system may use different partition table types. The necessity
+    of  the  Grub Bios partition depends only on the partition table type of the
+    boot disk.
+
+2.4.1.4. Convenience Partitions
+There  are  several  other  partitions  that  are  not  required,  but should be
+considered   when   designing   a   disk  layout.  The  following  list  is  not
+comprehensive, but is meant as a guide.
+
+    * /boot  - Highly recommended. Use this partition to store kernels and other
+      booting  information.  To  minimize  potential  boot  problems with larger
+      disks,  make this the first physical partition on your first disk drive. A
+      partition size of 200 megabytes is adequate.
+
+    * /boot/efi  -  The  EFI  System  Partition, which is needed for booting the
+      system with UEFI. Read the BLFS page for details.
+
+    * /home   -   Highly   recommended.  Share  your  home  directory  and  user 
+      customization  across  multiple  distributions  or LFS builds. The size is
+      generally fairly large and depends on available disk space.
+
+    * /usr  -  In  LFS, /bin, /lib, and /sbin are symlinks to their counterparts
+      in  /usr.  So /usr contains all the binaries needed for the system to run.
+      For  LFS  a  separate  partition  for  /usr is normally not needed. If you
+      create  it anyway, you should make a partition large enough to fit all the
+      programs and libraries in the system. The root partition can be very small
+      (maybe  just  one  gigabyte) in this configuration, so it's suitable for a
+      thin  client  or diskless workstation (where /usr is mounted from a remote
+      server).  However , you  should be aware that an initramfs (not covered by
+      LFS) will be needed to boot a system with a separate /usr partition.
+
+    * /opt  -  This  directory  is  most  useful  for BLFS, where multiple large
+      packages  like KDE or Texlive can be installed without embedding the files
+      in the /usr hierarchy. If used, 5 to 10 gigabytes is generally adequate.
+
+    * /tmp - A separate /tmp partition is rare, but useful if configuring a thin
+      client.  This partition, if used, will usually not need to exceed a couple
+      of gigabytes.  If  you  have  enough RAM, you can mount a tmpfs on /tmp to
+      make access to temporary files faster.
+
+    * /usr/src - This partition is very useful for providing a location to store
+      BLFS source files and share them across LFS builds. It can also be used as
+      a  location  for  building  BLFS packages. A reasonably large partition of
+      30-50 gigabytes provides plenty of room.
+
+Any  separate  partition  that  you  want  automatically mounted when the system
+starts  must  be  specified in the /etc/fstab file. Details about how to specify
+partitions will be discussed in Section 10.2, “Creating the /etc/fstab File”."
+
+book["2.5"]="Creating a New Partition"
+
+pages=("2.1" "2.2" "2.3" "2.4" "2.5")
+current_book_index=0
+
+cmd_book()
+{	local subcmd="$1"
+
+	case "$subcmd" in
+	next)
+		if (( current_book_index < ${#pages[@]} - 1 )); then
+			((current_book_index++))
+		else
+			echo "Already at the last section."
+		fi
+		;;
+	prev)
+		if (( current_book_index > 0 )); then
+			((current_book_index--))
+		else
+			echo "Already at the first section."
+		fi
+		;;
+	show|"")
+		local chapter="${pages[$current_book_index]}"
+		local content="${book[$chapter]}"
+		local title="${content%%$'\n'*}"
+		local body="${content#*$'\n'}"
+
+		# Print bold title
+		printf "\e[0m[\e[1;36m%s\e[0m] \e[1m%s\e[0m\n" "$chapter" "$title"
+
+		# Read char-by-char from $body and check for keypress on /dev/tty
+		local char
+		local keypress
+		exec 3</dev/tty  # open fd 3 for reading keyboard input
+
+		while IFS= read -r -n1 -d '' char; do
+	    	# Print the character (including newlines)
+	    	if [[ $char == $'\n' ]]; then
+		 	printf "\n"
+	    	else
+			printf "%s" "$char"
+	    	fi
+
+	    	# Non-blocking read from fd 3 to check for any keypress
+	    	if read -t 0.001 -n 1 -u 3 keypress; then
+			break
+	    	fi
+
+		sleep 0.002
+		done <<< "$body"$'\0'
+
+		echo
+		exec 3<&-  # close fd 3
+		;;
+
+	 	[0-9]*.[0-9]*)
+        	local found=0
+        	for i in "${!pages[@]}"; do
+            	if [[ "${pages[$i]}" == "$subcmd" ]]; then
+			current_book_index=$i
+			found=1
+			break
+		fi
+		done
+		(( !found )) && echo "Page $subcmd not found."
+		;;
+	*)
+		echo "Usage: next | prev | show | <chapter.page>"
+	;;
+	esac
+}
+
+cmd_help()
+{	echo "
+commands:
+    help
+    exit/quit
+    book
+scripts:
+    checkutils"
+}
+
+while true; do
+	echo -en "\e[0m} "
+	read -r input
+	echo -ne "\e[90m"
+
+	# Run Bash command if it starts with a dot
+	if [[ "$input" == .* ]]; then
+		input="${input:1}"
+		if [[ "$input" == cd* ]]; then
+			builtin cd ${input:3}
+		else
+		bash -c "$input"
+		fi
+		continue
+	fi
+
+	# Split input into command and args
+	cmd="${input%% *}"
+	args="${input#"$cmd"}"
+	args="${args# }"
+
+	case "$cmd" in
+		help)      cmd_help ;;
+		book)      cmd_book "$args" ;;
+		next|prev|show)
+			cmd_book "$cmd" ;;
+			[0-9]*.[0-9]*)
+			cmd_book "$cmd" ;;
+		exit)      echo "Bye-bye!"; break ;;
+		quit)      echo "Bye-bye!"; break ;;
+		checkutils) checkutils;;
+		*)         echo "Unknown command: $cmd. Type 'help'." ;;
+	esac
+done
